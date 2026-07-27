@@ -112,72 +112,80 @@
   // TTS fallback because the user-gesture context is lost.
   let USE_MP3 = true;
 
-  // Play a clip: browser TTS by default; a pre-generated MP3 (audio/<fileId>.mp3) when enabled.
-  function playAudio(fileId, text, rate, onEnd, useVoice) {
-    rate = rate || 1;
-    if (USE_MP3 && fileId) {
-      let fellBack = false;
-      const fb = () => {
-        if (!fellBack) {
-          fellBack = true;
-          speak(text, rate, onEnd, useVoice);
-        }
+  // ---------- audio controller: one thing plays at a time, with play/pause + button state ----------
+  const Player = {
+    active: false, paused: false, mode: null, audioEl: null, btn: null, clips: null, i: 0, gapTimer: null,
+    start(clips, btn) {
+      // clicking the SAME button that's already playing → pause / resume
+      if (this.active && this.btn === btn) { this.togglePause(); return; }
+      this.stop(); // stop anything else first → no overlapping audio
+      this.clips = clips.filter((c) => c && (c.text || c.fileId));
+      this.i = 0; this.btn = btn || null; this.active = true; this.paused = false;
+      this._mark("playing");
+      this._next();
+    },
+    _next() {
+      if (!this.active) return;
+      if (this.i >= this.clips.length) { this._finish(); return; }
+      const c = this.clips[this.i++];
+      const advance = () => { this.gapTimer = setTimeout(() => this._next(), c.gap || 0); };
+      if (USE_MP3 && c.fileId) {
+        const a = new Audio("audio/" + c.fileId + ".mp3");
+        a.playbackRate = c.rate || 1;
+        this.audioEl = a; this.mode = "mp3";
+        a.onended = () => { this.audioEl = null; advance(); };
+        a.onerror = () => { this.audioEl = null; this._tts(c, advance); }; // fall back to voice
+        a.play().catch(() => { this.audioEl = null; this._tts(c, advance); });
+      } else {
+        this._tts(c, advance);
+      }
+    },
+    _tts(c, advance) {
+      if (!synth) { toast("No speech voice on this device — generate MP3s for reliable audio."); advance(); return; }
+      this.mode = "tts";
+      const doSpeak = () => {
+        try { synth.resume(); } catch (e) {}
+        if (!voice) pickVoice();
+        const u = new SpeechSynthesisUtterance(c.text || "");
+        u.lang = "en-US"; u.rate = c.rate || 1;
+        const v = c.useVoice || voice; if (v) u.voice = v;
+        u.onend = () => advance();
+        synth.speak(u);
       };
-      const a = new Audio("audio/" + fileId + ".mp3");
-      a.playbackRate = rate;
-      a.onended = () => onEnd && onEnd();
-      a.onerror = fb;
-      a.play().catch(fb);
-      return a;
-    }
-    return speak(text, rate, onEnd, useVoice);
-  }
-  function speak(text, rate, onEnd, useVoice) {
-    if (!synth) {
-      toast(
-        "This browser has no speech synthesis. Use Chrome/Edge, or generate MP3s.",
-      );
-      onEnd && onEnd();
-      return;
-    }
-    const doSpeak = () => {
-      try {
-        synth.resume();
-      } catch (e) {} // Chrome sometimes gets stuck "paused"
-      if (!voice) pickVoice(); // voices may load late on first play
-      const u = new SpeechSynthesisUtterance(text);
-      u.lang = "en-US";
-      u.rate = rate || 1;
-      const v = useVoice || voice;
-      if (v) u.voice = v;
-      u.onend = () => onEnd && onEnd();
-      synth.speak(u);
-    };
-    // Chrome quirk: speaking immediately after cancel() can go silent — give it a tick.
-    if (synth.speaking || synth.pending) {
-      synth.cancel();
-      setTimeout(doSpeak, 120);
-    } else doSpeak();
-  }
-  // Simulated interview: interviewer asks (alt voice / <id>_q.mp3), then the model answer plays.
-  function playScene(c, rate, onEnd) {
-    const line = c.set.interviewer_line;
-    const answer = c.set.shadowing_script || c.topic.topic || "";
-    const playAnswer = () =>
-      playAudio(c.set.set_id, answer, rate, onEnd, voice);
-    if (line)
-      playAudio(
-        c.set.set_id + "_q",
-        line,
-        1,
-        () => setTimeout(playAnswer, 350),
-        altVoice,
-      );
-    else playAnswer();
-  }
-  const stopSpeak = () => {
-    if (synth) synth.cancel();
+      if (synth.speaking || synth.pending) { synth.cancel(); setTimeout(doSpeak, 120); } else doSpeak();
+    },
+    togglePause() {
+      if (!this.active) return;
+      if (this.paused) {
+        if (this.mode === "mp3" && this.audioEl) this.audioEl.play().catch(() => {});
+        else { try { synth.resume(); } catch (e) {} }
+        this.paused = false; this._mark("playing");
+      } else {
+        if (this.mode === "mp3" && this.audioEl) this.audioEl.pause();
+        else { try { synth.pause(); } catch (e) {} }
+        this.paused = true; this._mark("paused");
+      }
+    },
+    stop() {
+      this.active = false; this.paused = false;
+      clearTimeout(this.gapTimer);
+      try { if (synth) synth.cancel(); } catch (e) {}
+      if (this.audioEl) { this.audioEl.onended = null; this.audioEl.onerror = null; try { this.audioEl.pause(); } catch (e) {} this.audioEl = null; }
+      this._mark(false); this.btn = null; this.clips = null;
+    },
+    _finish() { this.active = false; this._mark(false); this.btn = null; },
+    _mark(state) {
+      document.querySelectorAll(".btn.playing").forEach((b) => { b.classList.remove("playing"); if (b._plabel != null) b.textContent = b._plabel; });
+      if (this.btn && state) {
+        if (this.btn._plabel == null) this.btn._plabel = this.btn.textContent;
+        this.btn.classList.add("playing");
+        this.btn.textContent = state === "paused" ? "▶ Resume" : "⏸ Pause";
+      }
+    },
   };
+  // play(clip | [clips], buttonEl). Each clip: {fileId?, text, rate?, useVoice?, gap?}
+  const play = (clips, btn) => Player.start(Array.isArray(clips) ? clips : [clips], btn);
+  const stopAudio = () => Player.stop();
 
   // ---------- speech: STT ----------
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -458,17 +466,25 @@
         el("button", {
           class: "btn",
           text: "▶ Play as interview",
-          onclick: () => playScene(c, rate),
+          onclick: (e) =>
+            play(
+              [
+                { fileId: c.set.set_id + "_q", text: c.set.interviewer_line, rate: 1, useVoice: altVoice, gap: 350 },
+                { fileId: c.set.set_id, text: script.textContent, rate: rate, useVoice: voice },
+              ],
+              e.currentTarget,
+            ),
         }),
         el("button", {
           class: "btn secondary",
           text: "▶ Answer only",
-          onclick: () => playAudio(c.set.set_id, script.textContent, rate),
+          onclick: (e) =>
+            play({ fileId: c.set.set_id, text: script.textContent, rate: rate, useVoice: voice }, e.currentTarget),
         }),
         el("button", {
           class: "btn secondary",
           text: "⏹ Stop",
-          onclick: stopSpeak,
+          onclick: stopAudio,
         }),
         speedControl(
           () => rate,
@@ -505,7 +521,8 @@
               el("button", {
                 class: "btn secondary",
                 text: "🔊 Hear",
-                onclick: () => speak(s, rate),
+                onclick: (e) =>
+                  play({ text: s, rate: rate, useVoice: voice }, e.currentTarget),
               }),
               el("span", { class: "hint", text: "→ pause → repeat out loud" }),
             ]),
@@ -581,12 +598,13 @@
         el("button", {
           class: "btn",
           text: "▶ Play",
-          onclick: () => playAudio(c.set.set_id, script.textContent, rate),
+          onclick: (e) =>
+            play({ fileId: c.set.set_id, text: script.textContent, rate: rate, useVoice: voice }, e.currentTarget),
         }),
         el("button", {
           class: "btn secondary",
           text: "⏹ Stop",
-          onclick: stopSpeak,
+          onclick: stopAudio,
         }),
         speedControl(
           () => rate,
@@ -649,7 +667,8 @@
               el("button", {
                 class: "btn secondary",
                 text: "🔊 Play",
-                onclick: () => speak(s, rate),
+                onclick: (e) =>
+                  play({ text: s, rate: rate, useVoice: voice }, e.currentTarget),
               }),
               el("button", {
                 class: "btn secondary",
@@ -740,7 +759,8 @@
             el("button", {
               class: "btn secondary",
               text: "🔊 Hear",
-              onclick: () => speak(b.personalized_example || b.pattern, 0.95),
+              onclick: (e) =>
+                play({ text: b.personalized_example || b.pattern, rate: 0.95, useVoice: voice }, e.currentTarget),
             }),
             readBtn,
             el("label", { class: "chk" }, [
@@ -772,11 +792,10 @@
         el("button", {
           class: "btn",
           text: "🔊 Hear model",
-          onclick: () =>
-            playAudio(
-              c.set.set_id,
-              c.set.shadowing_script || c.topic.topic,
-              0.95,
+          onclick: (e) =>
+            play(
+              { fileId: c.set.set_id, text: c.set.shadowing_script || c.topic.topic, rate: 0.95, useVoice: voice },
+              e.currentTarget,
             ),
         }),
       ]),
@@ -887,7 +906,8 @@
             el("button", {
               class: "btn secondary",
               text: "🔊 Hear",
-              onclick: () => speak(q, 0.95),
+              onclick: (e) =>
+                play({ text: q, rate: 0.95, useVoice: voice }, e.currentTarget),
             }),
           ]),
         ]),
@@ -1025,7 +1045,7 @@ Please: 1) score each rubric item with one concrete fix, 2) rewrite my weakest 2
     const s = STATIONS[activeStation];
     const main = $("#stations");
     main.innerHTML = "";
-    stopSpeak();
+    stopAudio();
     const card = el("div", { class: "card" }, [
       el("h3", {}, [
         s.icon + " " + s.name,
@@ -1046,13 +1066,10 @@ Please: 1) score each rubric item with one concrete fix, 2) rewrite my weakest 2
                   class: "btn secondary",
                   text: "🔊",
                   title: "Hear the interviewer",
-                  onclick: () =>
-                    playAudio(
-                      c.set.set_id + "_q",
-                      c.set.interviewer_line,
-                      1,
-                      null,
-                      altVoice,
+                  onclick: (e) =>
+                    play(
+                      { fileId: c.set.set_id + "_q", text: c.set.interviewer_line, rate: 1, useVoice: altVoice },
+                      e.currentTarget,
                     ),
                 }),
               ])

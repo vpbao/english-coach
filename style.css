@@ -110,6 +110,13 @@ main { max-width: 980px; margin: 6px auto 0; padding: 0 22px; }
 .btn:disabled { opacity: .45; cursor: not-allowed; }
 @keyframes pulse { 0%,100%{ box-shadow: 0 0 0 0 rgba(255,107,122,.5);} 50%{ box-shadow: 0 0 0 8px rgba(255,107,122,0);} }
 
+/* press + hover + playing feedback on all buttons */
+.btn, .ghost, .station-nav button { transition: transform .05s ease, box-shadow .15s ease, filter .15s ease; }
+.btn:hover:not(:disabled), .ghost:hover { filter: brightness(1.08); }
+.btn:active, .ghost:active, .station-nav button:active { transform: translateY(1px) scale(.98); }
+.btn.playing { background: linear-gradient(180deg, var(--good), #2fa588) !important; color: #062; animation: playpulse 1.2s infinite; }
+@keyframes playpulse { 0%,100%{ box-shadow: 0 0 0 0 rgba(67,197,158,.55);} 50%{ box-shadow: 0 0 0 8px rgba(67,197,158,0);} }
+
 .speed { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
 .speed input { accent-color: var(--accent); }
 
