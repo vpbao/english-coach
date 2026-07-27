@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>English Coach — Speaking & Listening Trainer</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">🎧</span>
+      <div>
+        <h1>English Coach</h1>
+        <p class="sub">Backend interview prep · 90-day trainer</p>
+      </div>
+    </div>
+    <div class="daynav">
+      <button id="prevDay" class="ghost" title="Previous day">◀</button>
+      <label class="dayselect">
+        Day
+        <select id="daySelect"></select>
+      </label>
+      <button id="nextDay" class="ghost" title="Next day">▶</button>
+    </div>
+  </header>
+
+  <section class="lesson-head">
+    <div class="lh-main">
+      <span id="phaseTag" class="tag"></span>
+      <h2 id="topicTitle">—</h2>
+      <p id="lessonMeta" class="meta"></p>
+    </div>
+    <div class="lh-side">
+      <div class="target">
+        <span class="tlabel">Target</span>
+        <span id="targetScore" class="tval">—</span>
+      </div>
+      <div class="timebudget">
+        <span class="tlabel">Session</span>
+        <span class="tval">~120 min</span>
+      </div>
+    </div>
+  </section>
+
+  <nav id="stationNav" class="station-nav"></nav>
+
+  <main id="stations"></main>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <footer class="foot">
+    <span id="supportNote"></span>
+  </footer>
+
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
